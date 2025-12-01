@@ -6,8 +6,10 @@ export default function Home() {
   // 计算进度
   const totalTools = 50;
   const completedTools = tools.filter(t => t.status === 'Live').length;
-  // 哪怕有一个在 Building，也算一点点进度
   const inProgressTools = tools.filter(t => t.status === 'Building').length;
+  // 规划中的虽然有数据，但我们不在统计条里显示了
+  
+  // 计算百分比
   const progressPercentage = ((completedTools + (inProgressTools * 0.5)) / totalTools) * 100;
 
   return (
@@ -26,16 +28,18 @@ export default function Home() {
         <div className="mt-8 max-w-md mx-auto bg-white p-4 rounded-xl shadow-sm border border-gray-100">
           <div className="flex justify-between text-sm font-medium text-gray-600 mb-2">
             <span>挑战进度</span>
-            <span>{tools.length} / {totalTools} (规划中)</span>
+            <span>{tools.length} / {totalTools}</span>
           </div>
           <div className="w-full bg-gray-100 rounded-full h-4 overflow-hidden">
             <div 
               className="bg-blue-600 h-4 rounded-full transition-all duration-1000 ease-out"
-              style={{ width: `${Math.max(progressPercentage, 5)}%` }} // 给个5%保底让它显示一点
+              style={{ width: `${Math.max(progressPercentage, 5)}%` }}
             ></div>
           </div>
+          
+          {/* 👇 修改点：只显示 已上线 和 开发中 */}
           <p className="text-xs text-gray-400 mt-2 text-right">
-             当前状态: {inProgressTools} 个开发中
+             {completedTools} 已上线 · {inProgressTools} 开发中
           </p>
         </div>
       </header>
@@ -53,7 +57,8 @@ export default function Home() {
                   'bg-gray-50 text-gray-600 ring-gray-500/10'
                 }`}>
                   {tool.status === 'Building' && <span className="w-1.5 h-1.5 bg-yellow-500 rounded-full mr-1.5 animate-pulse"></span>}
-                  {tool.status}
+                  {/* 这里保留卡片上的状态显示，以免“规划中”的卡片没有标签 */}
+                  {tool.status === 'Live' ? '已上线' : tool.status === 'Building' ? '开发中' : '规划中'}
                 </span>
               </div>
 
