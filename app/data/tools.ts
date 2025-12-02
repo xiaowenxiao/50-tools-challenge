@@ -36,5 +36,14 @@ export const tools: Tool[] = [
     category: "DevOps",
     icon: "🐘",
   },
+  {
+    id: 4,
+    title: "Docker 离线镜像打包器",
+    description: "输入镜像名，后台拉取并打包为 .tar 离线镜像供下载。",
+    status: "Live",
+    link: "/tools/docker-packer",
+    category: "DevOps",
+    icon: "📦",
+  },
   // ... 后面可以留着占位
 ];

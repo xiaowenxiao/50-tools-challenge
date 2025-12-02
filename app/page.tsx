@@ -8,7 +8,7 @@ export default function Home() {
   const completedTools = tools.filter(t => t.status === 'Live').length;
   const inProgressTools = tools.filter(t => t.status === 'Building').length;
   // 规划中的虽然有数据，但我们不在统计条里显示了
-  
+
   // 计算百分比
   const progressPercentage = ((completedTools + (inProgressTools * 0.5)) / totalTools) * 100;
 
@@ -20,7 +20,7 @@ export default function Home() {
           50 个 AI 小工具挑战
         </h1>
         <p className="text-xl text-gray-500 max-w-2xl mx-auto">
-          由 <span className="text-blue-600 font-bold">运维大虾</span> 构建。<br/>
+          由 <span className="text-blue-600 font-bold">运维大虾</span> 构建。<br />
           见证从 0 到 1 的独立开发之路。
         </p>
 
@@ -31,15 +31,15 @@ export default function Home() {
             <span>{tools.length} / {totalTools}</span>
           </div>
           <div className="w-full bg-gray-100 rounded-full h-4 overflow-hidden">
-            <div 
+            <div
               className="bg-blue-600 h-4 rounded-full transition-all duration-1000 ease-out"
               style={{ width: `${Math.max(progressPercentage, 5)}%` }}
             ></div>
           </div>
-          
+
           {/* 👇 修改点：只显示 已上线 和 开发中 */}
           <p className="text-xs text-gray-400 mt-2 text-right">
-             {completedTools} 已上线 · {inProgressTools} 开发中
+            {completedTools} 已上线 · {inProgressTools} 开发中
           </p>
         </div>
       </header>
@@ -49,13 +49,12 @@ export default function Home() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {tools.map((tool) => (
             <div key={tool.id} className={`group relative bg-white p-6 rounded-xl border transition-all duration-200 hover:shadow-lg ${tool.status === 'Planned' ? 'border-dashed border-gray-300' : 'border-gray-200'}`}>
-              
+
               <div className="absolute top-4 right-4">
-                <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${
-                  tool.status === 'Live' ? 'bg-green-50 text-green-700 ring-green-600/20' : 
-                  tool.status === 'Building' ? 'bg-yellow-50 text-yellow-800 ring-yellow-600/20' : 
-                  'bg-gray-50 text-gray-600 ring-gray-500/10'
-                }`}>
+                <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${tool.status === 'Live' ? 'bg-green-50 text-green-700 ring-green-600/20' :
+                    tool.status === 'Building' ? 'bg-yellow-50 text-yellow-800 ring-yellow-600/20' :
+                      'bg-gray-50 text-gray-600 ring-gray-500/10'
+                  }`}>
                   {tool.status === 'Building' && <span className="w-1.5 h-1.5 bg-yellow-500 rounded-full mr-1.5 animate-pulse"></span>}
                   {/* 这里保留卡片上的状态显示，以免“规划中”的卡片没有标签 */}
                   {tool.status === 'Live' ? '已上线' : tool.status === 'Building' ? '开发中' : '规划中'}
@@ -81,7 +80,7 @@ export default function Home() {
               )}
             </div>
           ))}
-          
+
           {/* 占位符 */}
           <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 flex flex-col items-center justify-center text-gray-300 min-h-[200px]">
             <span className="text-2xl mb-2">🚀</span>

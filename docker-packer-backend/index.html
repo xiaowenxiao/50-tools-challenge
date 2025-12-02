@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Docker 离线镜像打包器</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 React 和 ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- 引入 Babel 用于解析 JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- 引入图标库 Lucide (原生版) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* 自定义滚动条样式，让终端更像终端 */
+        .terminal-scroll::-webkit-scrollbar {
+            width: 8px;
+        }
+        .terminal-scroll::-webkit-scrollbar-track {
+            background: #1e1e1e; 
+        }
+        .terminal-scroll::-webkit-scrollbar-thumb {
+            background: #444; 
+            border-radius: 4px;
+        }
+        .terminal-scroll::-webkit-scrollbar-thumb:hover {
+            background: #666; 
+        }
+        .blink {
+            animation: blinker 1s linear infinite;
+        }
+        @keyframes blinker {
+            50% { opacity: 0; }
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-200 min-h-screen selection:bg-cyan-500 selection:text-white font-sans">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        
+        // --- 修复开始: 创建 Lucide 图标的 React 包装器 ---
+        
+        // 通用的图标渲染组件
+        const LucideIcon = ({ name, size = 24, className = "" }) => {
+            const iconDef = window.lucide.icons[name];
+            if (!iconDef) {
+                console.warn(`Icon ${name} not found`);
+                return null;
+            }
+            
+            return (
+                <svg 
+                    xmlns="http://www.w3.org/2000/svg" 
+                    width={size} 
+                    height={size} 
+                    viewBox="0 0 24 24" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    strokeWidth="2" 
+                    strokeLinecap="round" 
+                    strokeLinejoin="round"
+                    className={className}
+                >
+                    {iconDef.map((child, index) => {
+                        const [tag, attrs] = child;
+                        return React.createElement(tag, { ...attrs, key: index });
+                    })}
+                </svg>
+            );
+        };
+
+        // 定义我们需要用到的图标组件，使其像普通 React 组件一样工作
+        const Terminal = (props) => <LucideIcon name="Terminal" {...props} />;
+        const Package = (props) => <LucideIcon name="Package" {...props} />;
+        const Download = (props) => <LucideIcon name="Download" {...props} />;
+        const Copy = (props) => <LucideIcon name="Copy" {...props} />;
+        const Check = (props) => <LucideIcon name="Check" {...props} />;
+        const Loader2 = (props) => <LucideIcon name="Loader2" {...props} />;
+        const Server = (props) => <LucideIcon name="Server" {...props} />;
+        const Box = (props) => <LucideIcon name="Box" {...props} />;
+        const AlertCircle = (props) => <LucideIcon name="AlertCircle" {...props} />;
+        
+        // --- 修复结束 ---
+
+        // 后端 API 地址 - 如果前后端不在同一域，请修改这里
+        const API_BASE_URL = "http://192.168.123.100:8082";
+
+        function App() {
+            const [imageName, setImageName] = useState("");
+            const [isPacking, setIsPacking] = useState(false);
+            const [logs, setLogs] = useState([]);
+            const [result, setResult] = useState(null);
+            const [error, setError] = useState(null);
+            const logsEndRef = useRef(null);
+            const [copied, setCopied] = useState(false);
+
+            // 自动滚动到底部
+            useEffect(() => {
+                logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+            }, [logs]);
+
+            // --- 新增: 格式化 Docker 原始日志 ---
+            // 将类似 {"status":"Downloading","progress":"[=>]"} 的 JSON 清洗为易读文本
+            const formatRawLog = (msg) => {
+                if (!msg) return "";
+                // Docker 流可能会把一行 JSON 切断，或者一行包含多条 JSON
+                return msg.split('\n').map(line => {
+                    try {
+                        const trimLine = line.trim();
+                        if (!trimLine) return null; // 忽略空行
+                        
+                        // 如果看起来不像 JSON，直接返回
+                        if (!trimLine.startsWith('{')) return trimLine;
+
+                        // 尝试提取关键字段 (使用正则容错性更好，防止 JSON 解析失败导致整行丢失)
+                        const idMatch = trimLine.match(/"id":"([^"]*)"/);
+                        const statusMatch = trimLine.match(/"status":"([^"]*)"/);
+                        const progressMatch = trimLine.match(/"progress":"([^"]*)"/);
+                        
+                        if (statusMatch || progressMatch) {
+                            const id = idMatch ? idMatch[1] : '';
+                            const status = statusMatch ? statusMatch[1] : '';
+                            // 处理 unicode 转义字符 > (\u003e)
+                            let progress = progressMatch ? progressMatch[1] : '';
+                            progress = progress.replace(/\\u003e/g, '>');
+                            
+                            // 格式化为: ID: Status Progress
+                            // 例如: 12345: Downloading [===>     ]
+                            let text = '';
+                            if (id) text += `${id}: `;
+                            if (status) text += `${status} `;
+                            if (progress) text += `${progress}`;
+                            return text;
+                        }
+                        return trimLine;
+                    } catch (e) {
+                        return line;
+                    }
+                }).filter(Boolean).join('\n');
+            };
+
+            // 处理开始打包
+            const handlePack = () => {
+                if (!imageName.trim()) return;
+                
+                setIsPacking(true);
+                setLogs([]);
+                setResult(null);
+                setError(null);
+
+                // 建立 SSE 连接
+                const url = `${API_BASE_URL}/api/pack?image=${encodeURIComponent(imageName)}`;
+                const evtSource = new EventSource(url);
+
+                evtSource.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        
+                        // 记录日志
+                        if (data.level !== 'done') {
+                            setLogs(prev => [...prev, data]);
+                        }
+
+                        // 处理完成
+                        if (data.level === 'done') {
+                            setResult(data.payload);
+                            setIsPacking(false);
+                            evtSource.close();
+                        }
+
+                        // 处理错误
+                        if (data.level === 'error') {
+                            setError(data.msg);
+                            setIsPacking(false);
+                            evtSource.close();
+                        }
+
+                    } catch (e) {
+                        console.error("解析日志失败", e);
+                    }
+                };
+
+                evtSource.onerror = (err) => {
+                    console.error("SSE Error:", err);
+                    if (!result) { // 如果还没成功就断了，那就是真错了
+                        setError("连接中断，请检查后端服务是否启动");
+                        setIsPacking(false);
+                    }
+                    evtSource.close();
+                };
+            };
+
+            // 复制命令
+            const copyCommand = (cmd) => {
+                navigator.clipboard.writeText(cmd);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+            };
+
+            return (
+                <div className="container mx-auto px-4 py-10 max-w-4xl">
+                    {/* Header */}
+                    <div className="text-center mb-10">
+                        <div className="flex justify-center mb-4">
+                            <div className="bg-cyan-500/10 p-4 rounded-full border border-cyan-500/20">
+                                <Box size={48} className="text-cyan-400" />
+                            </div>
+                        </div>
+                        <h1 className="text-4xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent mb-2">
+                            Docker 离线镜像打包器
+                        </h1>
+                        <p className="text-slate-400">输入镜像名，自动拉取并转换为 <span className="text-cyan-400 font-mono bg-cyan-900/30 px-1 rounded">.tar</span> 离线包</p>
+                    </div>
+
+                    {/* Input Section */}
+                    <div className="bg-slate-800/50 backdrop-blur border border-slate-700 rounded-xl p-6 shadow-xl mb-8">
+                        <div className="flex flex-col md:flex-row gap-4">
+                            <div className="relative flex-1">
+                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                    <Server size={20} className="text-slate-500" />
+                                </div>
+                                <input 
+                                    type="text" 
+                                    className="block w-full pl-10 pr-4 py-4 bg-slate-900 border border-slate-600 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all font-mono text-lg" 
+                                    placeholder="例如: nginx:latest 或 mysql:8.0"
+                                    value={imageName}
+                                    onChange={(e) => setImageName(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && !isPacking && handlePack()}
+                                    disabled={isPacking}
+                                />
+                            </div>
+                            <button 
+                                onClick={handlePack}
+                                disabled={isPacking || !imageName}
+                                className={`px-8 py-4 rounded-lg font-bold text-lg flex items-center justify-center gap-2 transition-all ${
+                                    isPacking 
+                                    ? 'bg-slate-700 text-slate-400 cursor-not-allowed' 
+                                    : 'bg-cyan-600 hover:bg-cyan-500 text-white hover:shadow-[0_0_20px_rgba(8,145,178,0.5)]'
+                                }`}
+                            >
+                                {isPacking ? (
+                                    <><Loader2 className="animate-spin" /> 打包中...</>
+                                ) : (
+                                    <><Package /> 开始打包</>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Result Card (Success) */}
+                    {result && (
+                        <div className="bg-emerald-900/20 border border-emerald-500/30 rounded-xl p-6 mb-8 animate-fade-in-up">
+                            <div className="flex items-start gap-4">
+                                <div className="bg-emerald-500/20 p-3 rounded-full">
+                                    <Check size={32} className="text-emerald-400" />
+                                </div>
+                                <div className="flex-1">
+                                    <h3 className="text-xl font-bold text-emerald-400 mb-2">打包成功！</h3>
+                                    <div className="grid grid-cols-2 gap-4 text-sm text-slate-300 mb-4">
+                                        <div>文件名: <span className="text-white font-mono">{result.filename}</span></div>
+                                        <div>大小: <span className="text-white font-mono">{result.size}</span></div>
+                                    </div>
+                                    
+                                    {/* Tips */}
+                                    {result.tips && (
+                                        <div className="bg-emerald-950/50 border border-emerald-500/20 rounded-lg p-3 mb-4 text-sm text-emerald-300 flex items-center gap-2">
+                                            <AlertCircle size={16} />
+                                            {result.tips}
+                                        </div>
+                                    )}
+
+                                    {/* Command */}
+                                    <div className="bg-slate-900 rounded-lg border border-slate-700 p-4 relative group">
+                                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button 
+                                                onClick={() => copyCommand(result.cmd_load)}
+                                                className="bg-slate-700 hover:bg-slate-600 text-slate-200 p-1.5 rounded text-xs flex items-center gap-1"
+                                            >
+                                                {copied ? <Check size={14} /> : <Copy size={14} />}
+                                                {copied ? '已复制' : '复制命令'}
+                                            </button>
+                                        </div>
+                                        <code className="font-mono text-cyan-300 block break-all">
+                                            {result.cmd_load}
+                                        </code>
+                                    </div>
+
+                                    <div className="mt-6 text-right">
+                                        <a 
+                                            href={`${API_BASE_URL}${result.url}`}
+                                            target="_blank"
+                                            className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-lg font-bold transition-colors"
+                                        >
+                                            <Download size={20} />
+                                            下载镜像包
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Error Card */}
+                    {error && (
+                        <div className="bg-red-900/20 border border-red-500/30 rounded-xl p-4 mb-8 flex items-center gap-3 text-red-400">
+                            <AlertCircle />
+                            <span>{error}</span>
+                        </div>
+                    )}
+
+                    {/* Terminal / Logs Area */}
+                    {(logs.length > 0 || isPacking) && (
+                        <div className="bg-slate-950 rounded-xl border border-slate-800 overflow-hidden shadow-2xl font-mono text-sm">
+                            <div className="bg-slate-900 px-4 py-2 border-b border-slate-800 flex items-center gap-2 text-slate-500 text-xs">
+                                <Terminal size={14} />
+                                <span>Build Logs</span>
+                            </div>
+                            <div className="p-4 h-64 overflow-y-auto terminal-scroll font-mono">
+                                {logs.map((log, index) => (
+                                    <div key={index} className="mb-1 leading-relaxed break-all">
+                                        <span className="text-slate-600 mr-2">
+                                            [{new Date(log.ts * 1000).toLocaleTimeString()}]
+                                        </span>
+                                        {log.level === 'raw' ? (
+                                            /* 修改这里: 使用 formatRawLog 处理原始日志，并添加 whitespace-pre-wrap 允许换行 */
+                                            <span className="text-slate-500 whitespace-pre-wrap">{formatRawLog(log.msg)}</span>
+                                        ) : log.level === 'info' ? (
+                                            <span className="text-cyan-300 font-bold">➜ {log.msg}</span>
+                                        ) : log.level === 'success' ? (
+                                            <span className="text-emerald-400 font-bold">✔ {log.msg}</span>
+                                        ) : log.level === 'error' ? (
+                                            <span className="text-red-400 font-bold">✘ {log.msg}</span>
+                                        ) : (
+                                            <span className="text-slate-300">{log.msg}</span>
+                                        )}
+                                    </div>
+                                ))}
+                                {isPacking && !result && !error && (
+                                    <div className="text-cyan-500 animate-pulse">_</div>
+                                )}
+                                <div ref={logsEndRef} />
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // 渲染 React 应用
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
