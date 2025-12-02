@@ -31,13 +31,10 @@ export default function DockerPacker() {
   const [copied, setCopied] = useState(false);
 
   // 简单的页面访问保护（session 级别）
-  const [authed, setAuthed] = useState<boolean>(() => {
-    try {
-      return typeof window !== 'undefined' && sessionStorage.getItem('docker_packer_authed') === '1';
-    } catch (e) {
-      return false;
-    }
-  });
+  // NOTE: avoid reading sessionStorage during SSR to prevent hydration mismatch.
+  // We'll determine auth status after mount.
+  const [authed, setAuthed] = useState<boolean>(false);
+  const [mounted, setMounted] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -73,6 +70,17 @@ export default function DockerPacker() {
       setAuthLoading(false);
     }
   };
+
+  // On client mount, read sessionStorage to set auth state and mark mounted.
+  useEffect(() => {
+    try {
+      const v = sessionStorage.getItem('docker_packer_authed') === '1';
+      setAuthed(Boolean(v));
+    } catch (e) {
+      setAuthed(false);
+    }
+    setMounted(true);
+  }, []);
 
   // 自动滚动日志
   useEffect(() => {
@@ -234,7 +242,7 @@ export default function DockerPacker() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50/50 p-4 md:p-8 font-sans text-slate-900">
+    <div className="docker-packer-light min-h-screen bg-slate-50/50 p-4 md:p-8 font-sans text-slate-900">
       {/* Password gate overlay (sessionStorage-based) */}
       {!authed && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4">
@@ -471,6 +479,25 @@ export default function DockerPacker() {
         }
         .terminal-scroll::-webkit-scrollbar-corner {
           background: transparent;
+        }
+        /* 强制浅色：在系统深色模式下覆盖常见深色背景与浅色文本 */
+        @media (prefers-color-scheme: dark) {
+          .docker-packer-light { background-color: #F3F4F6 !important; color: #0f172a !important; color-scheme: light !important; }
+          .docker-packer-light .bg-[#1e1e1e],
+          .docker-packer-light .bg-slate-950,
+          .docker-packer-light .bg-slate-900,
+          .docker-packer-light .bg-slate-800 {
+            background-color: #ffffff !important;
+          }
+          .docker-packer-light .text-slate-200,
+          .docker-packer-light .text-slate-300,
+          .docker-packer-light .text-slate-400,
+          .docker-packer-light .text-slate-500 {
+            color: #334155 !important;
+          }
+          .docker-packer-light .shadow-inner { box-shadow: none !important; }
+          .docker-packer-light .bg-gray-50 { background-color: #F9FAFB !important; }
+          .docker-packer-light code, .docker-packer-light pre { color: #0f172a !important; background: #F8FAFC !important; }
         }
       `}</style>
     </div>
